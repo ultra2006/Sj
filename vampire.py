@@ -1,3 +1,95 @@
+from telegram import Update
+from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
+import logging
+
+# Enable logging
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO
+)
+
+logger = logging.getLogger(__name__)
+
+# Replace with your actual Bot Token
+TOKEN = "7831102909:AAG3y0-k3qzoIX4SJCGtbHkDiDNJXuT3zdk"
+
+# Dictionary to store user information
+user_data = {}
+
+# Function to handle the /start command
+def start(update: Update, context: CallbackContext) -> None:
+    """Sends a message when the command /start is issued."""
+    user = update.effective_user
+    update.message.reply_markdown_v2(
+        fr'Hi {user.mention_markdown_v2()}\!',
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[
+                ['/name', '/attack'],
+                ['/location', '/cancel']
+            ],
+            one_time_keyboard=True,
+            input_field_placeholder='Choose an option'
+        )
+    )
+
+# Function to handle the /name command
+def name(update: Update, context: CallbackContext) -> None:
+    """Prompts the user to enter their name."""
+    update.message.reply_text("Please enter your name:")
+
+# Function to store the user's name
+def store_name(update: Update, context: CallbackContext) -> None:
+    """Stores the user's name in the dictionary."""
+    user_id = update.effective_user.id
+    user_data[user_id] = {'name': update.message.text}
+    update.message.reply_text(f"Your name is saved as: {update.message.text}")
+
+# Function to handle the /phone command
+def phone(update: Update, context: CallbackContext) -> None:
+    """Prompts the user to enter their phone number."""
+    update.message.reply_text("Please enter your phone number:")
+
+# Function to store the user's phone number
+def store_phone(update: Update, context: CallbackContext) -> None:
+    """Stores the user's phone number in the dictionary."""
+    user_id = update.effective_user.id
+    user_data[user_id]['phone'] = update.message.text 
+    update.message.reply_text(f"Your phone number is saved.")
+
+# Function to handle the /location command 
+# ... (Implement similar to name and phone)
+
+# Function to handle the /cancel command
+def cancel(update: Update, context: CallbackContext) -> None:
+    """Cancels the current interaction."""
+    user = update.message.from_user
+    logger.info("User %s canceled the conversation.", user.first_name)
+    update.message.reply_text('Interaction canceled.')
+
+# Main function to start the bot
+def main() -> None:
+    """Start the bot."""
+    # Create the Updater and Dispatcher
+    updater = Updater(TOKEN)
+    dispatcher = updater.dispatcher
+
+    # Add command handlers
+    dispatcher.add_handler(CommandHandler("start", start))
+    dispatcher.add_handler(CommandHandler("name", name))
+    dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, store_name))
+    dispatcher.add_handler(CommandHandler("phone", phone))
+    dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, store_phone))
+    # Add handlers for other commands and cancel
+    # ...
+
+    # Start the bot
+    updater.start_polling()
+
+    # Run the bot until you press Ctrl-C
+    updater.idle()
+
+if __name__ == '__main__':
+    main()
+
 import os
 import telebot
 import json
@@ -236,94 +328,3 @@ if __name__ == "__main__":
         logging.info(f"Waiting for {REQUEST_INTERVAL} seconds before the next request...")
         time.sleep(REQUEST_INTERVAL)
 
-from telegram import Update
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
-import logging
-
-# Enable logging
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO
-)
-
-logger = logging.getLogger(__name__)
-
-# Replace with your actual Bot Token
-TOKEN = "7831102909:AAG3y0-k3qzoIX4SJCGtbHkDiDNJXuT3zdk"
-
-# Dictionary to store user information
-user_data = {}
-
-# Function to handle the /start command
-def start(update: Update, context: CallbackContext) -> None:
-    """Sends a message when the command /start is issued."""
-    user = update.effective_user
-    update.message.reply_markdown_v2(
-        fr'Hi {user.mention_markdown_v2()}\!',
-        reply_markup=ReplyKeyboardMarkup(
-            keyboard=[
-                ['/name', '/attack'],
-                ['/location', '/cancel']
-            ],
-            one_time_keyboard=True,
-            input_field_placeholder='Choose an option'
-        )
-    )
-
-# Function to handle the /name command
-def name(update: Update, context: CallbackContext) -> None:
-    """Prompts the user to enter their name."""
-    update.message.reply_text("Please enter your name:")
-
-# Function to store the user's name
-def store_name(update: Update, context: CallbackContext) -> None:
-    """Stores the user's name in the dictionary."""
-    user_id = update.effective_user.id
-    user_data[user_id] = {'name': update.message.text}
-    update.message.reply_text(f"Your name is saved as: {update.message.text}")
-
-# Function to handle the /phone command
-def phone(update: Update, context: CallbackContext) -> None:
-    """Prompts the user to enter their phone number."""
-    update.message.reply_text("Please enter your phone number:")
-
-# Function to store the user's phone number
-def store_phone(update: Update, context: CallbackContext) -> None:
-    """Stores the user's phone number in the dictionary."""
-    user_id = update.effective_user.id
-    user_data[user_id]['phone'] = update.message.text 
-    update.message.reply_text(f"Your phone number is saved.")
-
-# Function to handle the /location command 
-# ... (Implement similar to name and phone)
-
-# Function to handle the /cancel command
-def cancel(update: Update, context: CallbackContext) -> None:
-    """Cancels the current interaction."""
-    user = update.message.from_user
-    logger.info("User %s canceled the conversation.", user.first_name)
-    update.message.reply_text('Interaction canceled.')
-
-# Main function to start the bot
-def main() -> None:
-    """Start the bot."""
-    # Create the Updater and Dispatcher
-    updater = Updater(TOKEN)
-    dispatcher = updater.dispatcher
-
-    # Add command handlers
-    dispatcher.add_handler(CommandHandler("start", start))
-    dispatcher.add_handler(CommandHandler("name", name))
-    dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, store_name))
-    dispatcher.add_handler(CommandHandler("phone", phone))
-    dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, store_phone))
-    # Add handlers for other commands and cancel
-    # ...
-
-    # Start the bot
-    updater.start_polling()
-
-    # Run the bot until you press Ctrl-C
-    updater.idle()
-
-if __name__ == '__main__':
-    main()
